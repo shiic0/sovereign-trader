@@ -1203,4 +1203,3 @@ else:
             <div style="color:#D4AF37; font-weight:700; margin-bottom:6px;">محادثة تداولية</div>
             <div style="color:#8899AA; font-size:0.85rem;">اسأل المستشار أي سؤال بعد التحليل وستحصل على إجابة فورية</div>
         </div>""", unsafe_allow_html=True)
-Content is user-generated and unverified.
