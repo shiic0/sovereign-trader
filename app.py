@@ -6,8 +6,130 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 from anthropic import Anthropic
 from datetime import datetime, timedelta
+import requests
+import time
 import warnings
 warnings.filterwarnings(‘ignore’)
+
+# ─── DATA SOURCE ROUTER ────────────────────────────────────────────────────────
+
+# Priority:
+
+# Crypto  → Binance API (free, real-time, institutional grade)
+
+# Global  → Alpha Vantage (free tier, reliable OHLCV)
+
+# Saudi   → Yahoo Finance (only free option for .SR)
+
+CRYPTO_SYMBOLS = {
+“BTC-USD”: “BTCUSDT”, “ETH-USD”: “ETHUSDT”, “SOL-USD”: “SOLUSDT”,
+“BNB-USD”: “BNBUSDT”, “XRP-USD”: “XRPUSDT”, “AVAX-USD”: “AVAXUSDT”,
+“DOGE-USD”: “DOGEUSDT”, “MATIC-USD”: “MATICUSDT”, “ADA-USD”: “ADAUSDT”,
+“DOT-USD”: “DOTUSDT”, “LINK-USD”: “LINKUSDT”, “LTC-USD”: “LTCUSDT”,
+}
+
+BINANCE_INTERVAL_MAP = {
+“15m”: “15m”, “1h”: “1h”, “4h”: “4h”, “1d”: “1d”, “1wk”: “1w”
+}
+
+BINANCE_PERIOD_LIMIT = {
+“15m”: 500, “1h”: 500, “4h”: 500, “1d”: 365, “1w”: 200
+}
+
+def fetch_binance(symbol_usdt, interval, limit=500):
+“””
+Binance Public API — zero auth, real-time, tick-level accurate.
+Returns standardised OHLCV DataFrame.
+“””
+b_interval = BINANCE_INTERVAL_MAP.get(interval, “1d”)
+url = “https://api.binance.com/api/v3/klines”
+params = {“symbol”: symbol_usdt, “interval”: b_interval, “limit”: limit}
+try:
+r = requests.get(url, params=params, timeout=10)
+r.raise_for_status()
+raw = r.json()
+df = pd.DataFrame(raw, columns=[
+“OpenTime”,“Open”,“High”,“Low”,“Close”,“Volume”,
+“CloseTime”,“QuoteVol”,“Trades”,“TakerBase”,“TakerQuote”,“Ignore”
+])
+df[“OpenTime”] = pd.to_datetime(df[“OpenTime”], unit=“ms”)
+df.set_index(“OpenTime”, inplace=True)
+for col in [“Open”,“High”,“Low”,“Close”,“Volume”]:
+df[col] = df[col].astype(float)
+df.index.name = “Datetime”
+return df[[“Open”,“High”,“Low”,“Close”,“Volume”]]
+except Exception:
+return None
+
+def fetch_alpha_vantage(ticker, interval, api_key):
+“””
+Alpha Vantage free tier — daily/weekly/intraday OHLCV.
+Best for global equities (AAPL, NVDA, ^GSPC proxies, etc.)
+Free key: 25 req/day, no credit card.
+“””
+base = “https://www.alphavantage.co/query”
+if interval == “1d”:
+params = {“function”: “TIME_SERIES_DAILY_ADJUSTED”,
+“symbol”: ticker, “outputsize”: “full”, “apikey”: api_key}
+ts_key = “Time Series (Daily)”
+elif interval == “1wk”:
+params = {“function”: “TIME_SERIES_WEEKLY_ADJUSTED”,
+“symbol”: ticker, “apikey”: api_key}
+ts_key = “Weekly Adjusted Time Series”
+else:  # intraday
+av_int = {“15m”:“15min”,“1h”:“60min”,“4h”:“60min”}.get(interval,“60min”)
+params = {“function”: “TIME_SERIES_INTRADAY”,
+“symbol”: ticker, “interval”: av_int,
+“outputsize”: “full”, “apikey”: api_key}
+ts_key = f”Time Series ({av_int})”
+
+```
+try:
+    r = requests.get(base, params=params, timeout=15)
+    data = r.json()
+    if ts_key not in data:
+        return None
+    ts = data[ts_key]
+    rows = []
+    for date_str, vals in ts.items():
+        o = float(vals.get("1. open", vals.get("1. Open", 0)))
+        h = float(vals.get("2. high", vals.get("2. High", 0)))
+        l = float(vals.get("3. low",  vals.get("3. Low",  0)))
+        c = float(vals.get("4. close", vals.get("5. adjusted close",
+                  vals.get("4. close", vals.get("4. Close", 0)))))
+        v = float(vals.get("5. volume", vals.get("6. volume",
+                  vals.get("5. Volume", 0))))
+        rows.append({"Datetime": pd.to_datetime(date_str),
+                     "Open":o,"High":h,"Low":l,"Close":c,"Volume":v})
+    if not rows:
+        return None
+    df = pd.DataFrame(rows).set_index("Datetime").sort_index()
+    return df
+except Exception:
+    return None
+```
+
+def fetch_yahoo_robust(ticker, period, interval):
+“””
+Yahoo Finance with hardened error handling — fallback for .SR and commodities.
+“””
+try:
+df = yf.download(ticker, period=period, interval=interval,
+progress=False, auto_adjust=True, timeout=15)
+if df.empty:
+# retry once with longer period
+time.sleep(1)
+df = yf.download(ticker, period=“2y”, interval=“1d”,
+progress=False, auto_adjust=True, timeout=15)
+if df.empty:
+return None
+if isinstance(df.columns, pd.MultiIndex):
+df.columns = df.columns.get_level_values(0)
+df = df.dropna()
+df.index.name = “Datetime”
+return df
+except Exception:
+return None
 
 # ─── PAGE CONFIG ───────────────────────────────────────────────────────────────
 
@@ -400,20 +522,57 @@ else:
         return "عرضي ⚪", "sideways"
 ```
 
-# ─── DATA FETCHING ──────────────────────────────────────────────────────────────
+# ─── SMART DATA ROUTER ─────────────────────────────────────────────────────────
 
-@st.cache_data(ttl=300)
-def fetch_data(ticker, period, interval):
-try:
-df = yf.download(ticker, period=period, interval=interval, progress=False, auto_adjust=True)
-if df.empty:
-return None
-if isinstance(df.columns, pd.MultiIndex):
-df.columns = df.columns.get_level_values(0)
-df = df.dropna()
+@st.cache_data(ttl=180)
+def fetch_data(ticker, period, interval, av_key=“demo”):
+“””
+Intelligent multi-source router:
+1. Crypto  → Binance (real-time, no key)
+2. Global  → Alpha Vantage (free key)
+3. Saudi / commodities / forex → Yahoo Finance (hardened)
+“””
+# Route 1: Binance for Crypto
+if ticker in CRYPTO_SYMBOLS:
+b_sym  = CRYPTO_SYMBOLS[ticker]
+limit  = BINANCE_PERIOD_LIMIT.get(interval, 500)
+df     = fetch_binance(b_sym, interval, limit)
+if df is not None and len(df) >= 50:
+st.session_state[“data_source”] = f”🟢 Binance (Real-Time) — {b_sym}”
 return df
-except Exception as e:
-return None
+st.session_state[“data_source”] = “🟡 Yahoo Finance (Crypto fallback)”
+return fetch_yahoo_robust(ticker, period, interval)
+
+```
+# Route 2: Alpha Vantage for Global Equities
+is_global = (
+    not ticker.endswith(".SR") and
+    "=F" not in ticker and
+    "=X" not in ticker and
+    ticker not in CRYPTO_SYMBOLS
+)
+if is_global and av_key and av_key != "demo":
+    df = fetch_alpha_vantage(ticker, interval, av_key)
+    if df is not None and len(df) >= 50:
+        st.session_state["data_source"] = f"🔵 Alpha Vantage — {ticker}"
+        return df
+    st.session_state["data_source"] = "🟡 Yahoo Finance (AV fallback)"
+    return fetch_yahoo_robust(ticker, period, interval)
+
+# Route 3: Yahoo Finance for Saudi / commodities / forex
+for key, label in {
+    ".SR": "🟡 Yahoo Finance (Saudi — تداول)",
+    "=F":  "🟡 Yahoo Finance (Commodities)",
+    "=X":  "🟡 Yahoo Finance (Forex)"
+}.items():
+    if key in ticker:
+        st.session_state["data_source"] = label
+        break
+else:
+    st.session_state["data_source"] = "🟡 Yahoo Finance"
+
+return fetch_yahoo_robust(ticker, period, interval)
+```
 
 # ─── CHART BUILDER ─────────────────────────────────────────────────────────────
 
@@ -784,6 +943,15 @@ show_bb = st.toggle("Bollinger Bands", value=True)
 show_macd = st.toggle("MACD", value=True)
 
 st.markdown('<div class="golden-divider"></div>', unsafe_allow_html=True)
+st.markdown("### 🔑 Alpha Vantage Key (اختياري)")
+av_key_input = st.text_input(
+    "للأسهم العالمية — احصل على مفتاح مجاني من alphavantage.co",
+    placeholder="اتركه فارغاً للكريبتو والأسهم السعودية",
+    type="password", key="av_key"
+)
+av_key = av_key_input.strip() if av_key_input else "demo"
+
+st.markdown('<div class="golden-divider"></div>', unsafe_allow_html=True)
 analyze_btn = st.button("⚔️ تحليل سيادي شامل", type="primary")
 
 st.markdown("""
@@ -821,11 +989,16 @@ if analyze_btn or (st.session_state.analysis_done and st.session_state.current_t
 
 ```
 with st.spinner(f"⚡ جاري جلب بيانات {ticker}..."):
-    df = fetch_data(ticker, period, interval)
+    _av = st.session_state.get('av_key', '') or 'demo'
+    df = fetch_data(ticker, period, interval, _av)
 
 if df is None or len(df) < 50:
     st.error(f"❌ تعذّر جلب بيانات {ticker}. تحقق من الرمز وأعد المحاولة.")
 else:
+    _src = st.session_state.get("data_source", "")
+    if _src:
+        _col = "#00FF88" if "Binance" in _src else "#00BFFF" if "Alpha" in _src else "#D4AF37"
+        st.markdown(f'<div style="text-align:right;font-size:0.78rem;color:{_col};margin-bottom:8px;font-family:monospace;">📡 مصدر البيانات: {_src}</div>', unsafe_allow_html=True)
     close = df['Close']
     price = close.iloc[-1]
     prev_price = close.iloc[-2] if len(close) > 1 else price
