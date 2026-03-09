@@ -8,9 +8,6 @@ from anthropic import Anthropic
 from datetime import datetime, timedelta
 import requests
 import time
-import warnings
-
-warnings.filterwarnings(‘ignore’)
 
 # ─── DATA SOURCE ROUTER ────────────────────────────────────────────────────────
 
@@ -1318,3 +1315,4 @@ with c3:
         <div style="color:#D4AF37; font-weight:700; margin-bottom:6px;">محادثة تداولية</div>
         <div style="color:#8899AA; font-size:0.85rem;">اسأل المستشار أي سؤال بعد التحليل وستحصل على إجابة فورية</div>
     </div>""", unsafe_allow_html=True)
+                        
