@@ -23,7 +23,7 @@ st.set_page_config(
     page_title="SOVEREIGN TRADER v2",
     page_icon="⚔️",
     layout="wide",
-    initial_sidebar_state="collapsed"
+    initial_sidebar_state="auto"
 )
 
 # ══════════════════════════════════════════════════
@@ -694,72 +694,94 @@ if st.session_state.page == "home":
 # ══════════════════════════════════════════════════
 
 elif st.session_state.page == "analysis":
-    with st.sidebar:
-        st.markdown('<div style="font-family:JetBrains Mono;font-size:.68rem;color:var(--gold);'
-                    'letter-spacing:3px;padding-bottom:10px;border-bottom:1px solid var(--border);'
-                    'margin-bottom:14px;">⚔️ ANALYSIS ENGINE</div>', unsafe_allow_html=True)
-        cat = st.selectbox("فئة الأصل",["الأسهم السعودية 🇸🇦","العملات الرقمية ₿","السلع 🏅","الفوركس 💱","أسواق عالمية 🌍"])
+
+    st.markdown('''<div class="page-header">
+      <div class="page-header-title">📊 التحليل الشامل</div>
+      <div class="page-header-desc">اختر الأصل والإطار الزمني ثم اضغط تحليل</div>
+    </div>''', unsafe_allow_html=True)
+
+    # ── صف الاختيارات ──
+    r1c1, r1c2, r1c3, r1c4 = st.columns([2, 2, 2, 2])
+    with r1c1:
+        cat = st.selectbox("فئة الأصل", ["الأسهم السعودية 🇸🇦","العملات الرقمية ₿","السلع 🏅","الفوركس 💱","أسواق عالمية 🌍"], label_visibility="collapsed")
+    with r1c2:
         if cat == "الأسهم السعودية 🇸🇦":
-            sector = st.selectbox("القطاع", list(SAUDI_SECTORS.keys()))
+            sector = st.selectbox("القطاع", list(SAUDI_SECTORS.keys()), label_visibility="collapsed")
             preset = SAUDI_SECTORS[sector]
         elif cat == "العملات الرقمية ₿":
-            sector = st.selectbox("الفئة", list(CRYPTO_SECTORS.keys()))
+            sector = st.selectbox("الفئة", list(CRYPTO_SECTORS.keys()), label_visibility="collapsed")
             preset = CRYPTO_SECTORS[sector]
-        elif cat == "السلع 🏅": preset = COMMODITIES
-        elif cat == "الفوركس 💱": preset = FOREX
-        else: preset = GLOBAL_INDICES
-        sel = st.selectbox("الأصل", list(preset.keys()))
+        elif cat == "السلع 🏅":
+            preset = COMMODITIES
+            st.selectbox("—", ["السلع"], label_visibility="collapsed")
+        elif cat == "الفوركس 💱":
+            preset = FOREX
+            st.selectbox("—", ["الفوركس"], label_visibility="collapsed")
+        else:
+            preset = GLOBAL_INDICES
+            st.selectbox("—", ["عالمي"], label_visibility="collapsed")
+    with r1c3:
+        sel = st.selectbox("الأصل", list(preset.keys()), label_visibility="collapsed")
         default_tkr = preset[sel]
-        custom = st.text_input("أو رمز مخصص", placeholder="4030.SR", value="")
+    with r1c4:
+        custom = st.text_input("رمز مخصص", placeholder="مثال: 4030.SR أو NVDA", label_visibility="collapsed")
         ticker = custom.strip().upper() if custom.strip() else default_tkr
-        tf_map = {"15 دقيقة":("5d","15m"),"1 ساعة":("30d","1h"),"4 ساعات":("60d","4h"),
-                  "يومي":("1y","1d"),"أسبوعي":("5y","1wk")}
-        tf = st.selectbox("الإطار الزمني", list(tf_map.keys()), index=3)
+
+    r2c1, r2c2, r2c3, r2c4, r2c5 = st.columns([2, 1, 1, 1, 2])
+    tf_map = {"15 دقيقة":("5d","15m"),"1 ساعة":("30d","1h"),"4 ساعات":("60d","4h"),"يومي":("1y","1d"),"أسبوعي":("5y","1wk")}
+    with r2c1:
+        tf = st.selectbox("الإطار", list(tf_map.keys()), index=3, label_visibility="collapsed")
         period, interval = tf_map[tf]
-        show_bb = st.toggle("Bollinger Bands", value=True)
+    with r2c2:
+        show_bb   = st.toggle("BB",   value=True)
+    with r2c3:
         show_macd = st.toggle("MACD", value=True)
-        show_fib = st.toggle("Fibonacci", value=False)
-        st.markdown('<div class="info-box" style="font-size:.7rem;">⚠️ للأغراض التعليمية فقط</div>',
-                    unsafe_allow_html=True)
-        analyze_btn = st.button("⚔️ تحليل شامل", type="primary")
+    with r2c4:
+        show_fib  = st.toggle("Fib",  value=False)
+    with r2c5:
+        analyze_btn = st.button("⚔️ تحليل شامل", type="primary", use_container_width=True)
+
+    st.markdown('<div class="divider"></div>', unsafe_allow_html=True)
 
     asset_type = ("سهم سعودي" if ".SR" in ticker else "عملة رقمية" if ticker in CRYPTO_SYMBOLS
                   else "سلعة" if "=F" in ticker else "فوركس" if "=X" in ticker else "سهم عالمي")
 
-    if analyze_btn or (st.session_state.analysis_done and st.session_state.current_ticker==ticker):
+    if analyze_btn or (st.session_state.analysis_done and st.session_state.current_ticker == ticker):
         with st.spinner(f"جلب {ticker}..."):
             df = get_data(ticker, period, interval)
-        if df is None or len(df)<50:
-            st.error(f"تعذّر جلب {ticker}")
+        if df is None or len(df) < 50:
+            st.error(f"تعذّر جلب {ticker} — تحقق من الرمز")
         else:
-            c = df["Close"]; price = float(c.iloc[-1]); prev = float(c.iloc[-2]) if len(c)>1 else price
-            chg = (price-prev)/prev*100; hi = float(df["High"].iloc[-1]); lo = float(df["Low"].iloc[-1])
-            trend_lbl, _ = get_trend(df); res_lvl, sup_lvl = calc_sr(df); r_now = float(rsi(c).iloc[-1])
-            atr_v = float(atr(df["High"],df["Low"],c).iloc[-1])
-            # مصدر البيانات الفعلي
+            c = df["Close"]; price = float(c.iloc[-1])
+            prev  = float(c.iloc[-2]) if len(c) > 1 else price
+            chg   = (price - prev) / prev * 100
+            hi    = float(df["High"].iloc[-1]); lo = float(df["Low"].iloc[-1])
+            trend_lbl, _ = get_trend(df)
+            res_lvl, sup_lvl = calc_sr(df)
+            r_now = float(rsi(c).iloc[-1])
+            atr_v = float(atr(df["High"], df["Low"], c).iloc[-1])
+
             q_check = get_quote(ticker)
-            src = q_check.get("source","TRADINGVIEW") if q_check else "TRADINGVIEW"
-            src_clr = ("#00D68F" if "BINANCE" in src
-                       else "#E8B84B" if "TRADINGVIEW" in src
-                       else "#64748B")
-            src_icon = "⚡" if "BINANCE" in src else "📡" if "TRADINGVIEW" in src else "⚠️"
-            st.markdown(f'<div style="text-align:right;font-family:JetBrains Mono;font-size:.66rem;'
-                        f'color:{src_clr};margin-bottom:8px;">{src_icon} {src} — {ticker}</div>',
-                        unsafe_allow_html=True)
-            # KPIs
+            src     = q_check.get("source", "YAHOO") if q_check else "YAHOO"
+            src_clr = "#00D68F" if "BINANCE" in src else "#E8B84B"
+            src_icon= "⚡" if "BINANCE" in src else "📡"
+            st.markdown(f'<div style="text-align:right;font-family:JetBrains Mono;font-size:.66rem;color:{src_clr};margin-bottom:8px;">{src_icon} {src} — {ticker}</div>', unsafe_allow_html=True)
+
             kpi_cols = st.columns(6)
-            kpis = [("السعر",f"{price:.4f}","var(--gold)"),("التغير",f"{chg:+.2f}%","var(--green)" if chg>=0 else "var(--red)"),
-                    ("الأعلى",f"{hi:.4f}","var(--cyan)"),("الأدنى",f"{lo:.4f}","var(--text)"),
-                    ("الاتجاه",trend_lbl,"var(--text)"),
-                    ("RSI",f"{r_now:.1f}","var(--red)" if r_now>70 else "var(--green)" if r_now<30 else "var(--gold)")]
-            for col,(lbl,val,clr) in zip(kpi_cols,kpis):
+            kpis = [
+                ("السعر",     f"{price:.4f}", "var(--gold)"),
+                ("التغير",    f"{chg:+.2f}%", "var(--green)" if chg>=0 else "var(--red)"),
+                ("الأعلى",    f"{hi:.4f}",    "var(--cyan)"),
+                ("الأدنى",    f"{lo:.4f}",    "var(--text)"),
+                ("الاتجاه",   trend_lbl,      "var(--text)"),
+                ("RSI",       f"{r_now:.1f}", "var(--red)" if r_now>70 else "var(--green)" if r_now<30 else "var(--gold)"),
+            ]
+            for col, (lbl, val, clr) in zip(kpi_cols, kpis):
                 with col:
-                    st.markdown(f'<div class="kpi-card"><div class="kpi-label">{lbl}</div>'
-                                f'<div class="kpi-value" style="color:{clr};font-size:.95rem;">{val}</div></div>',
-                                unsafe_allow_html=True)
+                    st.markdown(f'<div class="kpi-card"><div class="kpi-label">{lbl}</div><div class="kpi-value" style="color:{clr};font-size:.95rem;">{val}</div></div>', unsafe_allow_html=True)
+
             st.markdown('<div class="divider"></div>', unsafe_allow_html=True)
 
-            # Chart
             with st.spinner("بناء الشارت..."):
                 fig, r_s, ml, sl_s, hist, e20, e50, at, ks, kd, bbu, bbl = build_chart(
                     df, f"{ticker} — {asset_type}", sup_lvl, res_lvl, show_bb, show_macd, show_fib)
@@ -767,57 +789,54 @@ elif st.session_state.page == "analysis":
                             config={"displayModeBar":True,"displaylogo":False,
                                     "modeBarButtonsToRemove":["pan2d","select2d","lasso2d"]})
 
-            # Quick decision card
-            sl_p = round(price-1.5*atr_v, 4); t1_p = round(price+1.5*atr_v, 4); t2_p = round(price+3*atr_v, 4)
-            rr = round((t1_p-price)/max(price-sl_p,.0001), 2)
-            e20v = float(e20.iloc[-1]); e50v = float(e50.iloc[-1])
-            mv_ = float(ml.iloc[-1]); sv__ = float(sl_s.iloc[-1])
-            hr_ = float(hist.iloc[-1])>float(hist.iloc[-2]) if len(hist)>1 else False
-            vr_ = float(df["Volume"].iloc[-1]/df["Volume"].tail(20).mean()) if df["Volume"].tail(20).mean()>0 else 1
-            conf = int(sum([e20v>e50v, mv_>sv__, 35<r_now<65, hr_, vr_>1])/5*100)
-            cc = "var(--green)" if conf>=60 else "var(--red)" if conf<=40 else "var(--gold)"
+            sl_p  = round(price - 1.5*atr_v, 4)
+            t1_p  = round(price + 1.5*atr_v, 4)
+            t2_p  = round(price + 3.0*atr_v, 4)
+            rr    = round((t1_p - price) / max(price - sl_p, .0001), 2)
+            e20v  = float(e20.iloc[-1]); e50v = float(e50.iloc[-1])
+            mv_   = float(ml.iloc[-1]);  sv__ = float(sl_s.iloc[-1])
+            hr_   = float(hist.iloc[-1]) > float(hist.iloc[-2]) if len(hist) > 1 else False
+            vr_   = float(df["Volume"].iloc[-1] / df["Volume"].tail(20).mean()) if df["Volume"].tail(20).mean() > 0 else 1
+            conf  = int(sum([e20v>e50v, mv_>sv__, 35<r_now<65, hr_, vr_>1]) / 5 * 100)
+            cc    = "var(--green)" if conf>=60 else "var(--red)" if conf<=40 else "var(--gold)"
+
             st.markdown('<div class="section-title">⚡ القرار السريع</div>', unsafe_allow_html=True)
             qc = st.columns(5)
-            for col,(lbl,val,clr) in zip(qc,[
-                ("الدخول",f"{price:.4f}","var(--gold)"),("الهدف 1 🎯",f"{t1_p:.4f}","var(--green)"),
-                ("الهدف 2 🎯",f"{t2_p:.4f}","#4ADE80"),("وقف الخسارة 🛡️",f"{sl_p:.4f}","var(--red)"),
-                ("R:R",f"1:{rr}","var(--cyan)")]):
+            for col, (lbl, val, clr) in zip(qc, [
+                ("الدخول",       f"{price:.4f}", "var(--gold)"),
+                ("الهدف 1 🎯",   f"{t1_p:.4f}",  "var(--green)"),
+                ("الهدف 2 🎯",   f"{t2_p:.4f}",  "#4ADE80"),
+                ("وقف الخسارة 🛡️", f"{sl_p:.4f}", "var(--red)"),
+                ("R:R",          f"1:{rr}",       "var(--cyan)"),
+            ]):
                 with col:
-                    st.markdown(f'<div class="kpi-card"><div class="kpi-label">{lbl}</div>'
-                                f'<div class="kpi-value" style="color:{clr};font-size:.9rem;">{val}</div></div>',
-                                unsafe_allow_html=True)
-            st.markdown('<div class="divider"></div>', unsafe_allow_html=True)
+                    st.markdown(f'<div class="kpi-card"><div class="kpi-label">{lbl}</div><div class="kpi-value" style="color:{clr};font-size:.9rem;">{val}</div></div>', unsafe_allow_html=True)
 
-            # S/R Levels
+            st.markdown('<div class="divider"></div>', unsafe_allow_html=True)
             st.markdown('<div class="section-title">⚔️ الدعم والمقاومة</div>', unsafe_allow_html=True)
-            col_r, col_conf, col_s = st.columns([5,2,5])
+            col_r, col_conf, col_s = st.columns([5, 2, 5])
             with col_r:
                 rows_h = ""
-                for rv in sorted([x for x in res_lvl if x>price])[:5]:
-                    d = (rv-price)/price*100
+                for rv in sorted([x for x in res_lvl if x > price])[:5]:
+                    d   = (rv - price) / price * 100
                     st_ = "قريب 🔴" if abs(d)<3 else "متوسط 🟠" if abs(d)<7 else "بعيد"
                     rows_h += f'<tr style="background:rgba(255,69,96,.04)"><td style="color:#FF4560;font-weight:700">{rv:.4f}</td><td style="color:var(--muted)">{d:+.2f}%</td><td style="color:var(--muted);font-size:.76rem">{st_}</td></tr>'
                 st.markdown(f'<table class="levels-table"><thead><tr><th>🔴 مقاومة</th><th>البُعد</th><th>القوة</th></tr></thead><tbody>{rows_h}</tbody></table>', unsafe_allow_html=True)
             with col_conf:
                 cl = "شراء قوي" if conf>=70 else "بيع قوي" if conf<=30 else "محايد" if conf<=55 else "ميل شراء"
-                st.markdown(f'<div class="kpi-card" style="padding:14px 8px;"><div class="kpi-label" style="font-size:.56rem;">CONF</div>'
-                            f'<div class="kpi-value" style="color:{cc};font-size:1.4rem;">{conf}%</div>'
-                            f'<div style="font-size:.66rem;color:{cc};margin:4px 0;">{cl}</div>'
-                            f'<div style="height:3px;background:rgba(255,255,255,.06);border-radius:2px;">'
-                            f'<div style="width:{conf}%;height:100%;background:{cc};border-radius:2px;"></div></div></div>',
-                            unsafe_allow_html=True)
+                st.markdown(f'<div class="kpi-card" style="padding:14px 8px;"><div class="kpi-label" style="font-size:.56rem;">CONF</div><div class="kpi-value" style="color:{cc};font-size:1.4rem;">{conf}%</div><div style="font-size:.66rem;color:{cc};margin:4px 0;">{cl}</div><div style="height:3px;background:rgba(255,255,255,.06);border-radius:2px;"><div style="width:{conf}%;height:100%;background:{cc};border-radius:2px;"></div></div></div>', unsafe_allow_html=True)
             with col_s:
                 rows_h = ""
-                for sv in sorted([x for x in sup_lvl if x<price],reverse=True)[:5]:
-                    d = (sv-price)/price*100
+                for sv in sorted([x for x in sup_lvl if x < price], reverse=True)[:5]:
+                    d   = (sv - price) / price * 100
                     st_ = "قريب 🟢" if abs(d)<3 else "متوسط 🟡" if abs(d)<7 else "بعيد"
                     rows_h += f'<tr style="background:rgba(0,214,143,.04)"><td style="color:#00D68F;font-weight:700">{sv:.4f}</td><td style="color:var(--muted)">{d:+.2f}%</td><td style="color:var(--muted);font-size:.76rem">{st_}</td></tr>'
                 st.markdown(f'<table class="levels-table"><thead><tr><th>🟢 دعم</th><th>البُعد</th><th>القوة</th></tr></thead><tbody>{rows_h}</tbody></table>', unsafe_allow_html=True)
-            st.markdown('<div class="divider"></div>', unsafe_allow_html=True)
 
-            # AI STREAMING
+            st.markdown('<div class="divider"></div>', unsafe_allow_html=True)
             st.markdown('<div class="section-title">🤖 التحليل الذكي — Streaming</div>', unsafe_allow_html=True)
-            if analyze_btn or not st.session_state.analysis_done or st.session_state.current_ticker!=ticker:
+
+            if analyze_btn or not st.session_state.analysis_done or st.session_state.current_ticker != ticker:
                 try:
                     client = Anthropic(api_key=st.secrets["ANTHROPIC_API_KEY"])
                     prompt = build_ai_prompt(ticker, df, r_s, ml, sl_s, hist, e20, e50, at, ks, kd, bbu, bbl,
@@ -831,27 +850,25 @@ elif st.session_state.page == "analysis":
                             full_text += chunk
                             ph.markdown(f'<div class="ai-box">{full_text}▋</div>', unsafe_allow_html=True)
                     ph.markdown(f'<div class="ai-box">{full_text}</div>', unsafe_allow_html=True)
-                    st.session_state.ai_text = full_text
-                    st.session_state.analysis_done = True
+                    st.session_state.ai_text        = full_text
+                    st.session_state.analysis_done  = True
                     st.session_state.current_ticker = ticker
-                    st.session_state.chat_history = []
+                    st.session_state.chat_history   = []
                 except Exception as e:
                     st.error(f"خطأ AI: {e}")
             else:
                 st.markdown(f'<div class="ai-box">{st.session_state.ai_text}</div>', unsafe_allow_html=True)
 
-            # Chat
             st.markdown('<div class="divider"></div>', unsafe_allow_html=True)
             st.markdown('<div class="section-title">💬 سؤال المستشار</div>', unsafe_allow_html=True)
             for msg in st.session_state.chat_history:
-                style = ('background:rgba(232,184,75,.06);border:1px solid var(--border);border-radius:10px;'
-                         'padding:12px 16px;direction:rtl;margin:4px 0;' if msg["role"]=="user"
-                         else "")
-                icon = "👤" if msg["role"]=="user" else "⚔️"
-                cls = "" if msg["role"]=="user" else 'class="ai-box" style="font-size:.88rem;margin:4px 0;"'
+                style = ('background:rgba(232,184,75,.06);border:1px solid var(--border);border-radius:10px;padding:12px 16px;direction:rtl;margin:4px 0;' if msg["role"]=="user" else "")
+                cls   = '' if msg["role"]=="user" else 'class="ai-box" style="font-size:.88rem;margin:4px 0;"'
+                icon  = "👤" if msg["role"]=="user" else "⚔️"
                 st.markdown(f'<div style="{style}" {cls}>{icon} {msg["content"]}</div>', unsafe_allow_html=True)
-            ci, cs2 = st.columns([5,1])
-            with ci: uq = st.text_input("سؤالك", placeholder="اسأل المستشار...", label_visibility="collapsed", key="chat_in")
+            ci, cs2 = st.columns([5, 1])
+            with ci:
+                uq = st.text_input("سؤالك", placeholder="اسأل المستشار...", label_visibility="collapsed", key="chat_in")
             with cs2:
                 st.markdown("<br>", unsafe_allow_html=True)
                 sb = st.button("إرسال ⚡")
@@ -859,8 +876,9 @@ elif st.session_state.page == "analysis":
                 st.session_state.chat_history.append({"role":"user","content":uq})
                 try:
                     client = Anthropic(api_key=st.secrets["ANTHROPIC_API_KEY"])
-                    msgs = [{"role":"user","content":f"مستشار تداولي. تحليلك: {st.session_state.ai_text[:600]}"}]
-                    for m in st.session_state.chat_history[:-1]: msgs.append({"role":m["role"],"content":m["content"]})
+                    msgs   = [{"role":"user","content":f"مستشار تداولي. تحليلك: {st.session_state.ai_text[:600]}"}]
+                    for m in st.session_state.chat_history[:-1]:
+                        msgs.append({"role":m["role"],"content":m["content"]})
                     msgs.append({"role":"user","content":uq})
                     rph = st.empty(); reply = ""
                     with client.messages.stream(model="claude-opus-4-5", max_tokens=500,
@@ -872,16 +890,10 @@ elif st.session_state.page == "analysis":
                     rph.markdown(f'<div class="ai-box" style="font-size:.88rem;">{reply}</div>', unsafe_allow_html=True)
                     st.session_state.chat_history.append({"role":"assistant","content":reply})
                     st.rerun()
-                except Exception as e: st.error(f"خطأ: {e}")
+                except Exception as e:
+                    st.error(f"خطأ: {e}")
     else:
-        st.markdown('<div style="text-align:center;padding:80px 20px;opacity:.5;">'
-                    '<div style="font-size:3rem;margin-bottom:14px;">📊</div>'
-                    '<div style="font-family:JetBrains Mono;font-size:.8rem;color:var(--gold);letter-spacing:3px;">'
-                    'افتح الشريط الجانبي ← اختر الأصل ← تحليل شامل</div></div>', unsafe_allow_html=True)
-
-# ══════════════════════════════════════════════════
-# PAGE: OPPORTUNITIES
-# ══════════════════════════════════════════════════
+        st.markdown('<div class="info-box" style="text-align:center;padding:40px;">اختر الأصل والإطار الزمني أعلاه ثم اضغط ⚔️ تحليل شامل</div>', unsafe_allow_html=True)
 
 elif st.session_state.page == "opportunities":
     st.markdown('<div class="page-header"><div class="page-header-title">⚡ ماسح الفرص — موازي سريع</div>'
